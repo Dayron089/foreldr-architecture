@@ -260,6 +260,7 @@ psql showcase < code-samples/db/queries.sql
 
 - **[foreldr-architecture](https://github.com/Dayron089/foreldr-architecture)** *(вы здесь)* — архитектура продукта: ELS-пайплайн, BER-память, LLM-роутинг, prompt engineering, схема БД.
 - **[openldr-architecture](https://github.com/Dayron089/openldr-architecture)** — Telegram ops-агент для FORELDR на OpenClaw + Grok 4.1 Fast: 30 Python CLI tools, cron-мониторинг, утренний дайджест, авто-алерты.
+- **[market-ldr-showcase](https://github.com/Dayron089/market-ldr-showcase)** — автономный AI-маркетолог для FORELDR: TikTok-сценарии под 6 сегментов аудитории, Reddit pain mining, 48 законов AI UGC, git-as-memory для накопления winning-patterns между сессиями.
 
 ---
 
