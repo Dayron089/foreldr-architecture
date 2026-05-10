@@ -1,0 +1,121 @@
+%% ELS Pipeline — 12 stages with sync/async lanes, fallback paths, and side effects.
+%% Hot path is the unbroken arrow chain through Receive → Delivery.
+%% Dashed arrows are async branches: media generation, persistence-on-failure paths,
+%% and fire-and-forget background work. Side-effect stores (vector memory, primary
+%% store, usage store) are dotted because they are touched, not blocking.
+flowchart TB
+    classDef stage fill:#f1f5f9,stroke:#0f172a,stroke-width:1px,color:#0f172a;
+    classDef llm fill:#fde68a,stroke:#92400e,stroke-width:1px,color:#451a03;
+    classDef gen fill:#bbf7d0,stroke:#166534,stroke-width:1px,color:#052e16;
+    classDef media fill:#fecaca,stroke:#991b1b,stroke-width:1px,color:#450a0a;
+    classDef bg fill:#e0e7ff,stroke:#3730a3,stroke-width:1px,color:#1e1b4b;
+    classDef store fill:#fafaf9,stroke:#78716c,stroke-width:1px,color:#1c1917,stroke-dasharray: 2 2;
+    classDef router fill:#fef3c7,stroke:#a16207,stroke-width:1px,color:#3f2d04;
+
+    subgraph CRITICAL_PATH["Critical path (sequential, ~2.5s p95)"]
+        direction TB
+        S1["1. Receive
+HTTP/WS frame
+≤ 5 ms"]:::stage
+        S2["2. Auth + Rate Limit
+JWT + Redis bucket
+≤ 10 ms"]:::stage
+        S3["3. Persist User Msg
+write-ahead
+≤ 30 ms"]:::stage
+        S4["4. Context Builder
+asyncio.gather, per-fetch timeout
+≤ 120 ms p95"]:::stage
+        S5["5. Brain Decision
+safety + intent + decision
+single LLM call, JSON-mode
+≤ 800 ms p95"]:::llm
+        ROUTER{{"6. Action Routing
+in-process branch"}}:::router
+        S7["7. Text Generation
+persona-tuned model
+≤ 1500 ms p95"]:::gen
+        S9["9. Persist Assistant Msg
+≤ 30 ms"]:::stage
+        S10["10. WebSocket Delivery
+≤ 20 ms"]:::stage
+    end
+
+    subgraph ASYNC_BRANCH["Async media branch (parallel, non-blocking)"]
+        direction TB
+        S8a["8. Media Job Submit
+≤ 100 ms"]:::media
+        S8b["Media Job Resolution
+poll every N s
+5–90 s"]:::media
+    end
+
+    subgraph BACKGROUND["Fire-and-forget (post-delivery)"]
+        direction TB
+        S11a["11a. Memory Extraction
+on session close"]:::bg
+        S11b["11b. Session Summarization
+on session close"]:::bg
+        S11c["11c. Trust / Schedule update
+per-turn"]:::bg
+        S12["12. Cost & Latency Tracking
+async write, batched"]:::bg
+    end
+
+    subgraph STORES["Side-effect stores"]
+        direction TB
+        DB[("Primary store
+messages, sessions")]:::store
+        VEC[("Vector store
+long-term memory")]:::store
+        USAGE[("Usage store
+LLM cost ledger")]:::store
+    end
+
+    %% Critical path
+    S1 --> S2 --> S3 --> S4 --> S5 --> ROUTER
+    ROUTER -- "respond / deflect / refuse" --> S7
+    S7 --> S9 --> S10
+
+    %% Side effect: write-ahead persistence
+    S3 -. write .-> DB
+    S9 -. write .-> DB
+
+    %% Async media branch
+    ROUTER -- "media_requested=true" --> S8a
+    S8a -. async resolve .-> S8b
+    S8b -- "media URL" --> S10
+
+    %% Brain LLM fallback (provider chain)
+    S5 -. "primary fail
+fallback provider" .-> S5
+
+    %% Text LLM fallback
+    S7 -. "primary fail
+fallback provider" .-> S7
+
+    %% Background tasks fire after delivery
+    S10 -. "create_task" .-> S11a
+    S10 -. "create_task" .-> S11b
+    S10 -. "create_task" .-> S11c
+
+    %% Memory extraction reads/writes vector store
+    S11a -. read .-> DB
+    S11a -. write .-> VEC
+    S4 -. read .-> VEC
+
+    %% Every LLM stage logs to usage store
+    S5 -. record .-> USAGE
+    S7 -. record .-> USAGE
+    S8a -. record .-> USAGE
+    S11a -. record .-> USAGE
+    S11b -. record .-> USAGE
+    S12 -. flush .-> USAGE
+
+    %% Failure routes
+    S3 -. "DB write fail
+HTTP 503 to client" .-> S1
+    S5 -. "all providers fail
+safe default decision" .-> ROUTER
+    S8b -. "media fail
+text already shipped" .-> S10

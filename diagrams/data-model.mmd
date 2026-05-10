@@ -1,0 +1,142 @@
+%% Core domain model for an AI-companion platform.
+%% Subset of ~10 entities that captures the dominant access patterns:
+%% - User <-> Companion matching, with denormalized chat state on the match.
+%% - Append-only Message log; long-term Memory derived from sessions.
+%% - DialogSession bounds short-term context windows.
+%% - Schedule drives proactive engagement; Story is ephemeral media.
+%% - Gift / Violation are user-scoped side ledgers.
+
+erDiagram
+    USER ||--o{ MATCH               : "owns"
+    USER ||--o{ MESSAGE             : "authors"
+    USER ||--o{ DIALOG_SESSION      : "participates"
+    USER ||--o{ GIFT_PURCHASE       : "buys"
+    USER ||--o{ VIOLATION           : "reported_for"
+    USER ||--o{ STORY_VIEW          : "watches"
+
+    COMPANION ||--o{ MATCH          : "matched_to"
+    COMPANION ||--o{ MESSAGE        : "responds"
+    COMPANION ||--o{ MEMORY         : "remembers_about_user"
+    COMPANION ||--o{ DIALOG_SESSION : "participates"
+    COMPANION ||--o{ SCHEDULE       : "has"
+    COMPANION ||--o{ STORY          : "publishes"
+
+    MATCH        ||--o{ MESSAGE         : "groups"
+    MATCH        ||--o{ DIALOG_SESSION  : "scopes"
+    DIALOG_SESSION ||--o{ MESSAGE       : "contains"
+    DIALOG_SESSION ||--o{ MEMORY        : "produces"
+
+    STORY        ||--o{ STORY_VIEW   : "viewed_via"
+    GIFT_CATALOG ||--o{ GIFT_PURCHASE : "instantiated_by"
+
+    USER {
+        uuid     id PK
+        text     email
+        text     display_name
+        jsonb    preferences
+        timestamptz created_at
+    }
+
+    COMPANION {
+        uuid     id PK
+        text     slug
+        text     display_name
+        jsonb    personality_flavor
+        bool     is_active
+        timestamptz created_at
+    }
+
+    MATCH {
+        uuid     user_id PK_FK
+        uuid     companion_id PK_FK
+        text     last_message
+        timestamptz last_message_at
+        int      unread_count
+        bool     is_active
+        timestamptz created_at
+    }
+
+    MESSAGE {
+        uuid     id PK
+        uuid     user_id FK
+        uuid     companion_id FK
+        uuid     session_id FK
+        text     role
+        text     content
+        tsvector content_fts
+        timestamptz created_at
+    }
+
+    DIALOG_SESSION {
+        uuid     id PK
+        uuid     user_id FK
+        uuid     companion_id FK
+        bool     is_active
+        text     recap
+        timestamptz started_at
+        timestamptz closed_at
+    }
+
+    MEMORY {
+        uuid     id PK
+        uuid     user_id FK
+        uuid     companion_id FK
+        uuid     source_session_id FK
+        text     content
+        text     context_excerpt
+        vector   embedding
+        tsvector content_fts
+        int      access_count
+        timestamptz created_at
+    }
+
+    SCHEDULE {
+        uuid     id PK
+        uuid     companion_id FK
+        smallint day_of_week
+        time     starts_at
+        time     ends_at
+        text     activity
+    }
+
+    STORY {
+        uuid     id PK
+        uuid     companion_id FK
+        text     status
+        text     video_url
+        text     caption
+        timestamptz expires_at
+        timestamptz created_at
+    }
+
+    STORY_VIEW {
+        uuid     id PK
+        uuid     story_id FK
+        uuid     user_id FK
+        bool     liked
+        timestamptz viewed_at
+    }
+
+    GIFT_CATALOG {
+        uuid     id PK
+        text     sku
+        int      price_cents
+        bool     is_active
+    }
+
+    GIFT_PURCHASE {
+        uuid     id PK
+        uuid     user_id FK
+        uuid     companion_id FK
+        uuid     gift_id FK
+        int     amount_cents
+        timestamptz purchased_at
+    }
+
+    VIOLATION {
+        uuid     id PK
+        uuid     user_id FK
+        text     category
+        text     details
+        timestamptz created_at
+    }

@@ -1,0 +1,69 @@
+flowchart TB
+
+    %% =====================================================================
+    %% WRITE PATH — runs at session close, not per message
+    %% =====================================================================
+    subgraph WRITE["Write path — runs at session close"]
+        direction TB
+        UM[User message] --> SES[Active session<br/>short-term memory]
+        SES -->|30 min idle / hard cap| CLOSE[Session close]
+        CLOSE --> EXTRACT[Extractor LLM<br/>fact + context_excerpt + type + importance]
+        EXTRACT --> VAL[Validator<br/>importance ≥ 2 / schema check]
+        VAL --> DEDUP[Semantic dedup<br/>cosine ≥ 0.85 / Jaccard ≥ 0.70]
+        DEDUP --> ENRICH[Enrich for embedding<br/>fact + context_excerpt]
+        ENRICH --> VEC[Vectorizer<br/>batched / retry / dedup-by-hash]
+        VEC --> STORE[(memories<br/>pgvector HNSW<br/>+ GIN tsvector)]
+        CLOSE --> RECAP[Recap LLM<br/>100–150 tokens]
+        RECAP --> SS[(dialog_sessions.recap)]
+    end
+
+    %% =====================================================================
+    %% READ PATH — runs per user message
+    %% =====================================================================
+    subgraph READ["Read path — runs per user message"]
+        direction TB
+        Q[New user message] --> SMART[Smart query<br/>char_last_reply + user_msg<br/>+ last 4–6 turns]
+        SMART --> HYDE{HyDE expansion<br/>character context injected}
+        HYDE -->|success ~300ms| HQ[Hypothetical fact]
+        HYDE -->|timeout| SMART
+        HQ --> EMB[Embedding<br/>1536-dim]
+        HQ --> EXP[Expanded text<br/>for FTS]
+        EMB --> PG[(pgvector HNSW<br/>cosine top-Nk)]
+        EXP --> GIN[(Postgres GIN<br/>BM25 top-Nk)]
+        PG --> RRF[Reciprocal Rank Fusion<br/>k = 60]
+        GIN --> RRF
+        RRF --> CAND[Candidate set<br/>~3·top_k items]
+        CAND --> CUTOFF[Hard cutoffs<br/>cosine ≥ 0.20<br/>backstory ≥ 0.40]
+        CUTOFF --> SCORE[Scoring V2<br/>relevance × decay × activation<br/>× core × category]
+        SCORE --> FILTER[Adaptive filter<br/>abs / rel / gap]
+        FILTER --> TOP[Top-K facts]
+        TOP --> JOIN[TOP-2 enrichment<br/>JOIN dialog_sessions.recap]
+        JOIN --> PROMPT[Inject into LLM context]
+        PROMPT --> RESP[Model response]
+        PROMPT --> ACT[fire-and-forget<br/>increment access_count<br/>update last_accessed]
+    end
+
+    %% =====================================================================
+    %% Cross-path links
+    %% =====================================================================
+    STORE -.read.-> PG
+    STORE -.read.-> GIN
+    SS -.read.-> JOIN
+    ACT -.write.-> STORE
+
+    %% =====================================================================
+    %% Caches
+    %% =====================================================================
+    subgraph CACHE["Redis 3-tier cache"]
+        direction LR
+        C1[char_data 24h]
+        C2[char_ctx 24h]
+        C3[char_hint 24h]
+        C4[search results 30m]
+        C5[embeddings 7d]
+    end
+    C3 -.- HYDE
+    C2 -.- EXTRACT
+    C4 -.- RRF
+    C5 -.- VEC
+    C5 -.- EMB
