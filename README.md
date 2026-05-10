@@ -254,6 +254,15 @@ psql showcase < code-samples/db/queries.sql
 
 ---
 
+## Связанные репозитории
+
+Это часть портфолио из нескольких репозиториев вокруг FORELDR:
+
+- **[foreldr-architecture](https://github.com/Dayron089/foreldr-architecture)** *(вы здесь)* — архитектура продукта: ELS-пайплайн, BER-память, LLM-роутинг, prompt engineering, схема БД.
+- **[openldr-architecture](https://github.com/Dayron089/openldr-architecture)** — Telegram ops-агент для FORELDR на OpenClaw + Grok 4.1 Fast: 30 Python CLI tools, cron-мониторинг, утренний дайджест, авто-алерты.
+
+---
+
 ## Об авторе
 
 **Dmitry Pelikh** — full-stack engineer, founder of FORELDR.
